@@ -39,6 +39,11 @@ jobs:
       with:
         go-version: '1.21'
 
+    - name: Setup MSVC environment
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ${{ matrix.target == 'aarch64-pc-windows-msvc' && 'arm64' || 'x64' }}
+
     - name: Build Rust library
       run: |
         cargo build --release --target ${{ matrix.target }}
@@ -50,6 +55,10 @@ jobs:
 
     - name: Test Go bindings (x86_64 only)
       if: matrix.target == 'x86_64-pc-windows-msvc'
+      env:
+        CGO_ENABLED: 1
+        CC: cl
+        CXX: cl
       run: |
         $env:CGO_LDFLAGS = "-L./artifacts"
         go build .
