@@ -8,6 +8,10 @@ edition = "2021"
 [lib]
 crate-type = ["staticlib"]
 
+# Windows-specific configuration
+[target.'cfg(windows)'.dependencies]
+# Windows system libraries are linked automatically by Rust
+
 [dependencies]
 libc = "0.2.162"
 tokenizers = {version = "0.20.2" }

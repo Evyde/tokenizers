@@ -1,4 +1,5 @@
 libtokenizers.a
+libtokenizers.lib
 /artifacts
 
 # Rust

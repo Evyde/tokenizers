@@ -1,0 +1,99 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+  merge_group: {}
+  workflow_dispatch: {}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
+        
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ matrix.target }}-
+          ${{ runner.os }}-cargo-
+
+    - name: Install Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Build Rust library
+      run: |
+        cargo build --release --target ${{ matrix.target }}
+
+    - name: Copy library
+      run: |
+        mkdir -p artifacts
+        copy target\${{ matrix.target }}\release\tokenizers.lib artifacts\libtokenizers.lib
+
+    - name: Test Go bindings (x86_64 only)
+      if: matrix.target == 'x86_64-pc-windows-msvc'
+      run: |
+        $env:CGO_LDFLAGS = "-L./artifacts"
+        go build .
+        go test -ldflags="-extldflags '-L./artifacts'" -v ./... -count=1
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: libtokenizers-windows-${{ matrix.target }}
+        path: artifacts/libtokenizers.lib
+
+  release-windows:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: build-windows
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
+        
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: libtokenizers-windows-${{ matrix.target }}
+        path: artifacts/
+
+    - name: Create release archive
+      run: |
+        $archName = "${{ matrix.target }}" -replace "pc-windows-msvc", ""
+        $archName = $archName -replace "x86_64", "amd64"
+        $archName = $archName -replace "aarch64", "arm64"
+        $archName = $archName.Trim("-")
+        
+        mkdir release-$archName
+        copy artifacts\libtokenizers.lib release-$archName\
+        
+        cd release-$archName
+        tar -czf ..\libtokenizers.windows-$archName.tar.gz libtokenizers.lib
+        cd ..
+
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-windows-${{ matrix.target }}
+        path: libtokenizers.windows-*.tar.gz

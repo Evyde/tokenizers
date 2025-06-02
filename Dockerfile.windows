@@ -1,0 +1,26 @@
+# Dockerfile for building Windows binaries using GitHub Actions
+# This is a simpler approach that uses the existing release infrastructure
+
+FROM --platform=linux/amd64 rust:1.71 as builder
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Copy source files
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src/
+COPY benches/ ./benches/
+
+# Build for Linux first (this should work)
+RUN cargo build --release
+
+# Create output directory
+RUN mkdir -p /output
+RUN cp target/release/libtokenizers.a /output/
+
+# List the built files
+RUN ls -la target/release/

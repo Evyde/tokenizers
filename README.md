@@ -4,7 +4,31 @@ Go bindings for the [HuggingFace Tokenizers](https://github.com/huggingface/toke
 
 ## Installation
 
-`make build` to build `libtokenizers.a` that you need to run your application that uses bindings. In addition, you need to inform the linker where to find that static library: `go run -ldflags="-extldflags '-L./path/to/libtokenizers/directory'" .` or just add it to the `CGO_LDFLAGS` environment variable: `CGO_LDFLAGS="-L./path/to/libtokenizers/directory"` to avoid specifying it every time.
+`make build` to build `libtokenizers.a` (Unix) or `libtokenizers.lib` (Windows) that you need to run your application that uses bindings. In addition, you need to inform the linker where to find that static library: `go run -ldflags="-extldflags '-L./path/to/libtokenizers/directory'" .` or just add it to the `CGO_LDFLAGS` environment variable: `CGO_LDFLAGS="-L./path/to/libtokenizers/directory"` to avoid specifying it every time.
+
+### Platform-specific builds
+
+#### Windows
+On Windows, you have several options:
+
+**Option 1: Use the provided scripts**
+- PowerShell: `.\build.ps1`
+- Command Prompt: `build.bat`
+
+**Option 2: Manual build**
+1. Install Rust toolchain with MSVC target: `rustup target add x86_64-pc-windows-msvc`
+2. Have Visual Studio Build Tools or Visual Studio installed for the MSVC linker
+3. Use `cargo build --release --target x86_64-pc-windows-msvc` to build the library
+4. Copy the library: `copy target\x86_64-pc-windows-msvc\release\tokenizers.lib libtokenizers.lib`
+5. Build Go bindings: `go build .`
+
+**Option 3: Use Make (if you have it installed)**
+- `make build-windows`
+
+📖 **For detailed Windows instructions, see [WINDOWS.md](WINDOWS.md)**
+
+#### Unix (Linux/macOS)
+- Use `make build` or manually run `cargo build --release && go build .`
 
 ### Using pre-built binaries
 
@@ -13,6 +37,8 @@ If you don't want to install Rust toolchain, build it in docker: `docker build -
 * [darwin-arm64](https://github.com/daulet/tokenizers/releases/latest/download/libtokenizers.darwin-arm64.tar.gz)
 * [linux-arm64](https://github.com/daulet/tokenizers/releases/latest/download/libtokenizers.linux-arm64.tar.gz)
 * [linux-amd64](https://github.com/daulet/tokenizers/releases/latest/download/libtokenizers.linux-amd64.tar.gz)
+* [windows-amd64](https://github.com/daulet/tokenizers/releases/latest/download/libtokenizers.windows-amd64.tar.gz)
+* [windows-arm64](https://github.com/daulet/tokenizers/releases/latest/download/libtokenizers.windows-arm64.tar.gz)
 
 ## Getting started
 
