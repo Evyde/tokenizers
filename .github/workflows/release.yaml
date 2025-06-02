@@ -86,14 +86,10 @@ jobs:
 
     - name: Update Cargo.toml for dynamic library
       run: |
-        # Backup original Cargo.toml
-        cp Cargo.toml Cargo.toml.bak
-        # Update crate-type to include cdylib for dynamic library
-        if [[ "${{ runner.os }}" == "Windows" ]]; then
-          powershell -Command "(Get-Content Cargo.toml) -replace 'crate-type = \[\"staticlib\"\]', 'crate-type = [\"staticlib\", \"cdylib\"]' | Set-Content Cargo.toml"
-        else
-          sed -i 's/crate-type = \["staticlib"\]/crate-type = ["staticlib", "cdylib"]/' Cargo.toml
-        fi
+        # Since we already have cdylib in Cargo.toml, just verify it
+        echo "Current Cargo.toml crate-type:"
+        grep "crate-type" Cargo.toml || echo "No crate-type found"
+        echo "Cargo.toml is already configured for both static and dynamic libraries"
       shell: bash
 
     - name: Build dynamic library
@@ -102,17 +98,38 @@ jobs:
     - name: Prepare artifacts
       run: |
         mkdir -p artifacts
+        echo "Contents of target/${{ matrix.target }}/release/:"
+        ls -la target/${{ matrix.target }}/release/ || echo "Release directory not found"
+
         if [[ "${{ runner.os }}" == "Windows" ]]; then
-          # Windows: copy both static and dynamic libraries
-          cp target/${{ matrix.target }}/release/tokenizers.dll artifacts/${{ matrix.lib_output }} || echo "DLL not found"
-          cp target/${{ matrix.target }}/release/tokenizers.lib artifacts/libtokenizers.lib || echo "LIB not found"
+          # Windows: copy dynamic library (DLL) and import library (LIB)
+          if [ -f "target/${{ matrix.target }}/release/tokenizers.dll" ]; then
+            cp target/${{ matrix.target }}/release/tokenizers.dll artifacts/libtokenizers.dll
+          fi
+          if [ -f "target/${{ matrix.target }}/release/tokenizers.lib" ]; then
+            cp target/${{ matrix.target }}/release/tokenizers.lib artifacts/libtokenizers.lib
+          fi
+          if [ -f "target/${{ matrix.target }}/release/tokenizers.dll.lib" ]; then
+            cp target/${{ matrix.target }}/release/tokenizers.dll.lib artifacts/libtokenizers.lib
+          fi
         elif [[ "${{ runner.os }}" == "macOS" ]]; then
           # macOS: copy dynamic library
-          cp target/${{ matrix.target }}/release/libtokenizers.dylib artifacts/${{ matrix.lib_output }} || echo "DYLIB not found"
+          if [ -f "target/${{ matrix.target }}/release/libtokenizers.dylib" ]; then
+            cp target/${{ matrix.target }}/release/libtokenizers.dylib artifacts/${{ matrix.lib_output }}
+          else
+            echo "DYLIB not found"
+            exit 1
+          fi
         else
           # Linux: copy dynamic library
-          cp target/${{ matrix.target }}/release/libtokenizers.so artifacts/${{ matrix.lib_output }} || echo "SO not found"
+          if [ -f "target/${{ matrix.target }}/release/libtokenizers.so" ]; then
+            cp target/${{ matrix.target }}/release/libtokenizers.so artifacts/${{ matrix.lib_output }}
+          else
+            echo "SO not found"
+            exit 1
+          fi
         fi
+        echo "Artifacts prepared:"
         ls -la artifacts/
       shell: bash
 
