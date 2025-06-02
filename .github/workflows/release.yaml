@@ -1,0 +1,202 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Windows builds
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-amd64
+            lib_name: tokenizers.lib
+            lib_output: libtokenizers.lib
+            
+          # macOS builds  
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: darwin-amd64
+            lib_name: libtokenizers.dylib
+            lib_output: libtokenizers.dylib
+            
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: darwin-arm64
+            lib_name: libtokenizers.dylib
+            lib_output: libtokenizers.dylib
+            
+          # Linux builds
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux-amd64
+            lib_name: libtokenizers.so
+            lib_output: libtokenizers.so
+            
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            name: linux-arm64
+            lib_name: libtokenizers.so
+            lib_output: libtokenizers.so
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ matrix.target }}-
+          ${{ runner.os }}-cargo-
+
+    - name: Install cross-compilation tools (Linux ARM64)
+      if: matrix.target == 'aarch64-unknown-linux-gnu'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+
+    - name: Setup cross-compilation environment (Linux ARM64)
+      if: matrix.target == 'aarch64-unknown-linux-gnu'
+      run: |
+        echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+        echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+        echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> $GITHUB_ENV
+        echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+    - name: Update Cargo.toml for dynamic library
+      run: |
+        # Backup original Cargo.toml
+        cp Cargo.toml Cargo.toml.bak
+        # Update crate-type to include cdylib for dynamic library
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          powershell -Command "(Get-Content Cargo.toml) -replace 'crate-type = \[\"staticlib\"\]', 'crate-type = [\"staticlib\", \"cdylib\"]' | Set-Content Cargo.toml"
+        else
+          sed -i 's/crate-type = \["staticlib"\]/crate-type = ["staticlib", "cdylib"]/' Cargo.toml
+        fi
+      shell: bash
+
+    - name: Build dynamic library
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Prepare artifacts
+      run: |
+        mkdir -p artifacts
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          # Windows: copy both static and dynamic libraries
+          cp target/${{ matrix.target }}/release/tokenizers.dll artifacts/${{ matrix.lib_output }} || echo "DLL not found"
+          cp target/${{ matrix.target }}/release/tokenizers.lib artifacts/libtokenizers.lib || echo "LIB not found"
+        elif [[ "${{ runner.os }}" == "macOS" ]]; then
+          # macOS: copy dynamic library
+          cp target/${{ matrix.target }}/release/libtokenizers.dylib artifacts/${{ matrix.lib_output }} || echo "DYLIB not found"
+        else
+          # Linux: copy dynamic library
+          cp target/${{ matrix.target }}/release/libtokenizers.so artifacts/${{ matrix.lib_output }} || echo "SO not found"
+        fi
+        ls -la artifacts/
+      shell: bash
+
+    - name: Create archive
+      run: |
+        cd artifacts
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          7z a ../libtokenizers-${{ matrix.name }}.zip *
+        else
+          tar -czf ../libtokenizers-${{ matrix.name }}.tar.gz *
+        fi
+        cd ..
+        ls -la libtokenizers-${{ matrix.name }}.*
+      shell: bash
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: libtokenizers-${{ matrix.name }}
+        path: libtokenizers-${{ matrix.name }}.*
+
+  create-release:
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+        find artifacts -name "libtokenizers-*" -type f | while read file; do
+          cp "$file" release-assets/
+        done
+        ls -la release-assets/
+
+    - name: Get tag name
+      id: tag
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Release
+      run: |
+        gh release create ${{ steps.tag.outputs.tag }} \
+          --title "Release ${{ steps.tag.outputs.tag }}" \
+          --notes "## Tokenizers Go Library Release ${{ steps.tag.outputs.tag }}
+
+        This release includes pre-built dynamic libraries for all supported platforms:
+
+        ### Windows
+        - \`libtokenizers-windows-amd64.zip\` - Windows x86_64 (Intel/AMD 64-bit)
+
+        ### macOS
+        - \`libtokenizers-darwin-amd64.tar.gz\` - macOS x86_64 (Intel)
+        - \`libtokenizers-darwin-arm64.tar.gz\` - macOS ARM64 (Apple Silicon)
+
+        ### Linux
+        - \`libtokenizers-linux-amd64.tar.gz\` - Linux x86_64 (Intel/AMD 64-bit)
+        - \`libtokenizers-linux-arm64.tar.gz\` - Linux ARM64 (AArch64)
+
+        ### Usage
+
+        1. Download the appropriate archive for your platform
+        2. Extract the library file to your project directory
+        3. Set the library path: \`export CGO_LDFLAGS=\"-L.\"\`
+        4. Build your Go application: \`go build .\`
+
+        ### What's New
+        - ✅ Full Windows support with MSVC toolchain
+        - ✅ Dynamic libraries for all platforms
+        - ✅ Comprehensive build scripts and documentation
+        - ✅ Cross-platform compatibility
+
+        For detailed installation and usage instructions, see the [Windows documentation](https://github.com/Evyde/tokenizers/blob/main/WINDOWS.md)." \
+          release-assets/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

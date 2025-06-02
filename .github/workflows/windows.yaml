@@ -6,6 +6,8 @@ on:
   pull_request: {}
   merge_group: {}
   workflow_dispatch: {}
+  release:
+    types: [created]
 
 jobs:
   build-windows:
